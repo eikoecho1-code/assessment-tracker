@@ -1,0 +1,16 @@
+const fs=require("node:fs"),assert=require("node:assert");
+const html=fs.readFileSync("index.html","utf8");
+assert.match(html,/id="file"[^>]*type="file"/);
+assert.match(html,/Load Spreadsheet/);
+assert.match(html,/manifest\.webmanifest/);
+assert.match(html,/serviceWorker\.register\(["']\/service-worker\.js["']\)/);
+const m=JSON.parse(fs.readFileSync("manifest.webmanifest","utf8"));
+assert.equal(m.name,"Assessment Tracker"); assert.equal(m.display,"standalone");
+assert.ok(m.icons.some(i=>i.sizes==="192x192")); assert.ok(m.icons.some(i=>i.sizes==="512x512"));
+for(const p of ["icons/icon-192.png","icons/icon-512.png","icons/icon-maskable-512.png"]) assert.ok(fs.existsSync(p),p);
+const sw=fs.readFileSync("service-worker.js","utf8");
+assert.match(sw,/assessment-tracker-v1/);
+assert.match(sw,/xlsx@0\.18\.5/); assert.match(sw,/chart\.js@4\.4\.4/);
+const v=JSON.parse(fs.readFileSync("vercel.json","utf8"));
+assert.ok(v.headers.some(r=>r.source==="/service-worker.js"));
+console.log("PWA smoke tests passed");
