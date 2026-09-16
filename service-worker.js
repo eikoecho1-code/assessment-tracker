@@ -1,4 +1,4 @@
-const CACHE = "assessment-tracker-v7";
+const CACHE = "assessment-tracker-release-3-20260916";
 const APP_SHELL = [
   "/",
   "/index.html",
