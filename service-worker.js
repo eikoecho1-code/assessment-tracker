@@ -1,4 +1,4 @@
-const CACHE = "assessment-tracker-v2";
+const CACHE = "assessment-tracker-v4";
 const APP_SHELL = [
   "/",
   "/index.html",

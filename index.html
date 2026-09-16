@@ -148,23 +148,57 @@ const $=x=>document.getElementById(x), esc=x=>String(x??"").replace(/[&<>"']/g,c
 function json(ws){return XLSX.utils.sheet_to_json(ws,{defval:"",range:3})}
 function parseSetup(ws){let a=XLSX.utils.sheet_to_json(ws,{header:1,defval:""}),o={};for(let r=4;r<=8;r++)if(a[r]?.[0])o[a[r][0]]=a[r][1];return o}
 function parseAss(ws){let a=XLSX.utils.sheet_to_json(ws,{header:1,defval:""}),out=[];for(let r=4;r<=9;r++){let x=a[r]||[];if(x[0]&&String(x[2]).toLowerCase()==="yes"){let comps=[];for(let k=0;k<6;k++){let n=x[4+k*2],m=Number(x[5+k*2])||0;if(n)comps.push({name:n,max:m})}out.push({slot:r-3,name:x[1]||x[0],overallMax:Number(x[3])||100,comps})}}return out}
-$("file").onchange=async e=>{let f=e.target.files[0];if(!f)return;$("msg").textContent="Reading "+f.name+"…";try{let wb=XLSX.read(await f.arrayBuffer(),{type:"array",cellDates:true});D.setup=parseSetup(wb.Sheets["SETUP"]);D.ass=parseAss(wb.Sheets["ASSESSMENT SETUP"]);D.students=json(wb.Sheets["STUDENTS"]).filter(x=>x["Student Name"]&&String(x["Active?"]).toLowerCase()!=="no");D.marks=parseMarks(wb.Sheets["MARKS"],D.students);D.recs=wb.Sheets["RECOMMENDATIONS"]?json(wb.Sheets["RECOMMENDATIONS"]).filter(x=>x["Skill / Component"]&&String(x["Active?"]).toLowerCase()!=="no"):[];D.notes=wb.Sheets["TEACHER NOTES"]?json(wb.Sheets["TEACHER NOTES"]).filter(x=>x["Student Name"]):[];$("brand").textContent=(D.setup.Subject||"")+" Assessment Tracker";$("sub").textContent=[D.setup["Teacher Name"],D.setup["Academic Year"]].filter(Boolean).join(" · ");$("welcome").textContent=(D.setup.Subject||"Assessment")+" Dashboard";let cs=[...new Set(D.students.map(x=>x.Class).filter(Boolean))].sort();cls="";$("loaded").classList.remove("hidden");$("msg").textContent="Loaded successfully.";renderClassCards()}catch(err){console.error(err);$("msg").textContent="Could not read this workbook. Please use Assessment Tracker V2."}};
-function parseMarks(ws,students){let a=XLSX.utils.sheet_to_json(ws,{header:1,defval:""}),out=[];for(let r=5;r<a.length;r++){let master=students[r-5];if(!master?.["Student Name"])continue;let cells=a[r]||[],row={name:master["Student Name"],class:master.Class,ass:[]};for(let q=0;q<6;q++){let st=2+q*9,components=cells.slice(st,st+6),overall=cells[st+6]??"",total=cells[st+7]??"",pct=cells[st+8]??"";row.ass.push({components,overall,total,pct})}out.push(row)}return out}
-function mfor(n){return D.marks.find(x=>String(x.name).trim()===String(n).trim())||{ass:[]}}
+$("file").onchange=async e=>{let f=e.target.files[0];if(!f)return;$("msg").textContent="Reading "+f.name+"…";try{let wb=XLSX.read(await f.arrayBuffer(),{type:"array",cellDates:true});D.setup=parseSetup(wb.Sheets["SETUP"]);D.ass=parseAss(wb.Sheets["ASSESSMENT SETUP"]);let studentRows=json(wb.Sheets["STUDENTS"]);D.students=studentRows.filter(x=>x["Student Name"]&&String(x["Active?"]).toLowerCase()!=="no");D.marks=parseMarks(wb.Sheets["MARKS"],studentRows);D.recs=wb.Sheets["RECOMMENDATIONS"]?json(wb.Sheets["RECOMMENDATIONS"]).filter(x=>x["Skill / Component"]&&String(x["Active?"]).toLowerCase()!=="no"):[];D.notes=wb.Sheets["TEACHER NOTES"]?json(wb.Sheets["TEACHER NOTES"]).filter(x=>x["Student Name"]):[];$("brand").textContent=(D.setup.Subject||"")+" Assessment Tracker";$("sub").textContent=[D.setup["Teacher Name"],D.setup["Academic Year"]].filter(Boolean).join(" · ");$("welcome").textContent=(D.setup.Subject||"Assessment")+" Dashboard";let cs=[...new Set(D.students.map(x=>x.Class).filter(Boolean))].sort();cls="";$("loaded").classList.remove("hidden");let invalidCount=countInvalidScores(D.marks,D.ass),identityConflicts=countIdentityConflicts(D.students),warnings=[];if(invalidCount)warnings.push(`${invalidCount} invalid score${invalidCount===1?"":"s"} ignored`);if(identityConflicts)warnings.push(`${identityConflicts} students share the same name and class without Student IDs`);$("msg").textContent=warnings.length?`Loaded with warnings: ${warnings.join("; ")}.`:"Loaded successfully.";renderClassCards()}catch(err){console.error(err);$("msg").textContent="Could not read this workbook. Please use Assessment Tracker V2."}};
+function normIdentity(v){return String(v??"").trim().toLowerCase()}
+function studentId(st){return String(st?.["Student ID (optional)"]??st?.id??"").trim()}
+function studentKey(st){let id=studentId(st);return id?"id:"+normIdentity(id):"nc:"+normIdentity(st?.["Student Name"]??st?.name)+"|"+normIdentity(st?.Class??st?.class)}
+function noteKey(note){let id=String(note?.["Student ID (optional)"]??"").trim();return id?"id:"+normIdentity(id):"nc:"+normIdentity(note?.["Student Name"])+"|"+normIdentity(note?.Class)}
+function noteMatchesStudent(note,st){return noteKey(note)===studentKey(st)}
+function countIdentityConflicts(students){let seen=new Map(),count=0;students.forEach(st=>{if(studentId(st))return;let key=studentKey(st),n=(seen.get(key)||0)+1;seen.set(key,n);if(n===2)count+=2;else if(n>2)count++});return count}
+function parseMarks(ws,students){let a=XLSX.utils.sheet_to_json(ws,{header:1,defval:""}),out=[];for(let r=5;r<a.length;r++){let master=students[r-5];if(!master?.["Student Name"])continue;let cells=a[r]||[],row={id:studentId(master),name:master["Student Name"],class:master.Class,key:studentKey(master),ass:[]};for(let q=0;q<6;q++){let st=2+q*9,components=cells.slice(st,st+6),overall=cells[st+6]??"",total=cells[st+7]??"",pct=cells[st+8]??"";row.ass.push({components,overall,total,pct})}out.push(row)}return out}
+function mfor(st){let key=studentKey(st);return D.marks.find(x=>x.key===key)||{id:studentId(st),name:st?.["Student Name"]??st?.name??"",class:st?.Class??st?.class??"",key,ass:[]}}
+function scoreRatio(raw,max){
+ if(raw===""||raw==null)return null;
+ let n=Number(raw),m=Number(max);
+ if(!Number.isFinite(n)||!Number.isFinite(m)||m<=0||n<0||n>m)return null;
+ return n/m;
+}
 function calcPct(m,a){
  let x=m.ass[a.slot-1]; if(!x)return "";
  if(a.comps.length){
-   let used=false,total=0,max=0;
-   a.comps.forEach((c,j)=>{let raw=x.components[j];if(raw!==""&&raw!=null){used=true;total+=Number(raw)||0}max+=Number(c.max)||0});
-   return used&&max>0?total/max:"";
+   let used=false,total=0,max=0,invalid=false;
+   a.comps.forEach((c,j)=>{
+     let cm=Number(c.max),raw=x.components[j];
+     if(!Number.isFinite(cm)||cm<=0){invalid=true;return}
+     max+=cm;
+     if(raw!==""&&raw!=null){
+       used=true;
+       if(scoreRatio(raw,cm)===null){invalid=true;return}
+       total+=Number(raw);
+     }
+   });
+   return used&&!invalid&&max>0?total/max:"";
  }
- return x.overall!==""&&x.overall!=null&&a.overallMax>0?(Number(x.overall)||0)/a.overallMax:"";
+ let ratio=scoreRatio(x.overall,a.overallMax);
+ return ratio===null?"":ratio;
+}
+function countInvalidScores(marks,ass){
+ let count=0;
+ marks.forEach(m=>ass.forEach(a=>{
+   let x=m.ass[a.slot-1];if(!x)return;
+   if(a.comps.length){
+     a.comps.forEach((c,j)=>{let raw=x.components[j];if(raw!==""&&raw!=null&&scoreRatio(raw,c.max)===null)count++});
+   }else{
+     let raw=x.overall;if(raw!==""&&raw!=null&&scoreRatio(raw,a.overallMax)===null)count++;
+   }
+ }));
+ return count;
 }
 
 function latestIndex(m){let z=-1;D.ass.forEach(a=>{if(calcPct(m,a)!=="")z=a.slot-1});return z}
 let trendChartObj=null,distChartObj=null;
 function classStats(c){
- let ss=D.students.filter(x=>x.Class===c),ms=ss.map(x=>mfor(x["Student Name"])),pass=(Number(D.setup["Pass Mark (%)"])||50)/100,li=-1;
+ let ss=D.students.filter(x=>x.Class===c),ms=ss.map(st=>mfor(st)),pass=(Number(D.setup["Pass Mark (%)"])||50)/100,li=-1;
  D.ass.forEach(a=>{if(ms.some(m=>calcPct(m,a)!==""))li=a.slot-1});
  let a=D.ass.find(x=>x.slot-1===li),vals=a?ms.map(m=>calcPct(m,a)).filter(x=>x!==""):[];
  let avg=vals.length?vals.reduce((x,y)=>x+Number(y),0)/vals.length:"",pr=vals.length?vals.filter(x=>Number(x)>=pass).length/vals.length:"";
@@ -206,7 +240,7 @@ function studentMascot(name){
 }
 function studentBadges(m,a,pass,topNames){
  let p=calcPct(m,a),d=studentDelta(m,a),out=[];
- if(topNames.includes(m.name))out.push('<span class="pill gold">🏆 Top Performer</span>');
+ if(topNames.includes(m.key))out.push('<span class="pill gold">🏆 Top Performer</span>');
  if(d!=null&&d>=.05)out.push('<span class="pill green">🚀 Improving</span>');
  if(p!==""&&p<pass)out.push('<span class="pill red">🎯 Support</span>');
  return out.join("")||'<span class="pill blue">📘 On Track</span>'
@@ -231,7 +265,7 @@ function buildComponentTrends(z){
  D.ass.forEach(a=>{
    if(!a.comps?.length)return;
    a.comps.forEach((c,j)=>{
-     let vals=z.ms.map(m=>{let raw=m.ass[a.slot-1]?.components[j];return raw===""||raw==null?null:(Number(raw)||0)/c.max}).filter(v=>v!=null);
+     let vals=z.ms.map(m=>{let raw=m.ass[a.slot-1]?.components[j];return scoreRatio(raw,c.max)}).filter(v=>v!=null);
      if(!vals.length)return;
      let avg=vals.reduce((s,v)=>s+v,0)/vals.length,key=c.name.trim().toLowerCase();
      if(!map.has(key))map.set(key,{name:c.name,points:[]});
@@ -250,17 +284,17 @@ function buildComponentTrends(z){
 }
 function getComponentStats(z){
  let a=z.a,li=z.li,out=[];
- if(a?.comps.length){a.comps.forEach((c,j)=>{let vs=z.ms.map(m=>{let raw=m.ass[li]?.components[j];return raw===""||raw==null?null:(Number(raw)||0)/c.max}).filter(x=>x!=null);if(vs.length)out.push({name:c.name,p:vs.reduce((s,v)=>s+v,0)/vs.length})})}
+ if(a?.comps.length){a.comps.forEach((c,j)=>{let vs=z.ms.map(m=>{let raw=m.ass[li]?.components[j];return scoreRatio(raw,c.max)}).filter(x=>x!=null);if(vs.length)out.push({name:c.name,p:vs.reduce((s,v)=>s+v,0)/vs.length})})}
  return out
 }
 function studentSnapshot(m,a,pass,topNames,compNames){
  let p=calcPct(m,a),d=studentDelta(m,a),parts=[];
- if(topNames.includes(m.name))parts.push("🌟 <b>Strong performance</b>");
+ if(topNames.includes(m.key))parts.push("🌟 <b>Strong performance</b>");
  else if(d!=null&&d>=.05)parts.push("🚀 <b>Big improvement</b>");
  else if(p!==""&&p<pass)parts.push("🎯 <b>Needs a check-in</b>");
  else parts.push("📘 <b>Steady progress</b>");
  if(a?.comps.length){
-   let cs=a.comps.map((c,j)=>{let raw=m.ass[a.slot-1]?.components[j];return raw===""||raw==null?null:{name:c.name,p:(Number(raw)||0)/c.max}}).filter(Boolean).sort((x,y)=>y.p-x.p);
+   let cs=a.comps.map((c,j)=>{let raw=m.ass[a.slot-1]?.components[j],p=scoreRatio(raw,c.max);return p===null?null:{name:c.name,p}}).filter(Boolean).sort((x,y)=>y.p-x.p);
    if(cs.length){parts.push("💪 Strength: "+esc(cs[0].name));if(cs.length>1)parts.push("🎯 Focus: "+esc(cs[cs.length-1].name))}
  }
  return '<div class="student-snapshot">'+parts.join("<br>")+"</div>"
@@ -270,10 +304,10 @@ function render(){
  $("kpis").innerHTML=kpi("👥 Students",ss.length,"Active in "+cls)+kpi("📘 Class Average",pc(avg),a?.name||"No scores")+kpi("✅ Pass rate",pr===""?"—":(pr*100).toFixed(1)+"%","Pass mark "+pass*100+"%")+kpi("📈 Change",change==null?"—":(change>=0?"+":"")+(change*100).toFixed(1)+" pp",z.prevA?z.prevA.name+" → "+a.name:"Need 2 assessments");
  drawTrendChart(z);drawDistributionChart(z);
 
- let perf=a?ms.map(m=>({name:m.name,p:calcPct(m,a)})).filter(x=>x.p!=="").sort((x,y)=>y.p-x.p):[];
- let top=perf.slice(0,3).map(x=>({name:x.name,value:pc(x.p),extra:a?.name||""}));
+ let perf=a?ms.map(m=>({key:m.key,name:m.name,p:calcPct(m,a)})).filter(x=>x.p!=="").sort((x,y)=>y.p-x.p):[];
+ let top=perf.slice(0,3).map(x=>({key:x.key,name:x.name,value:pc(x.p),extra:a?.name||""}));
  $("topPerformers").innerHTML=top.length?`<div class="spotlight"><div class="micro-message">🌟 CURRENT CLASS STAR</div><div class="big">${esc(top[0].name)}</div><div class="muted">${esc(top[0].value)} · ${esc(top[0].extra)}</div></div>`+rankRows(top.slice(1),"top"):rankRows(top,"top");
- let improvers=a?ms.map(m=>({name:m.name,d:studentDelta(m,a)})).filter(x=>x.d!=null&&x.d>0).sort((x,y)=>y.d-x.d).map(x=>({name:x.name,value:"+"+(x.d*100).toFixed(1)+" pp",extra:"From first to latest assessment"})):[];
+ let improvers=a?ms.map(m=>({key:m.key,name:m.name,d:studentDelta(m,a)})).filter(x=>x.d!=null&&x.d>0).sort((x,y)=>y.d-x.d).map(x=>({name:x.name,value:"+"+(x.d*100).toFixed(1)+" pp",extra:"From first to latest assessment"})):[];
  $("mostImproved").innerHTML=rankRows(improvers,"improve");
  let support=perf.filter(x=>x.p<pass).sort((x,y)=>x.p-y.p).map(x=>({name:x.name,value:pc(x.p),extra:"Below "+(pass*100)+"% pass mark"}));
  $("needsSupport").innerHTML=rankRows(support,"support");
@@ -282,8 +316,8 @@ function render(){
  `<div class="performance-card"><div class="picon">📈</div><h3>Most Improved</h3><div class="pname">${bestImp?studentMascot(bestImp.name)+" "+esc(bestImp.name):"—"}</div><div class="pvalue">${bestImp?esc(bestImp.value):"No positive overall improvement"}</div></div>`+
  `<div class="performance-card"><div class="picon">🏆</div><h3>Top Performer</h3><div class="pname">${topOne?studentMascot(topOne.name)+" "+esc(topOne.name):"—"}</div><div class="pvalue">${topOne?esc(topOne.value):"No scores yet"}</div></div>`;
 
- let topNames=top.map(x=>x.name);
- $("students").innerHTML=ss.map(st=>{let m=mfor(st["Student Name"]),i=latestIndex(m),la=D.ass.find(x=>x.slot-1===i),v=la?calcPct(m,la):"";return `<div class="student" onclick='openP(${JSON.stringify(String(st["Student Name"]))})'><div class="student-top"><span class="student-animal">${studentMascot(st["Student Name"])}</span><div><strong>${esc(st["Student Name"])}</strong><br><span class="muted">${esc(st.Class)}</span></div></div><div class="score">${pc(v)}</div><small>${la?esc(la.name):"No scores"}</small><div>${la?studentBadges(m,la,pass,topNames):'<span class="pill blue">📘 No scores</span>'}</div>${la?studentSnapshot(m,la,pass,topNames):""}</div>`}).join("")||empty("No students.");
+ let topNames=top.map(x=>x.key);
+ $("students").innerHTML=ss.map(st=>{let m=mfor(st),i=latestIndex(m),la=D.ass.find(x=>x.slot-1===i),v=la?calcPct(m,la):"",key=studentKey(st);return `<div class="student" onclick='openP(${JSON.stringify(key)})'><div class="student-top"><span class="student-animal">${studentMascot(st["Student Name"])}</span><div><strong>${esc(st["Student Name"])}</strong><br><span class="muted">${esc(st.Class)}</span></div></div><div class="score">${pc(v)}</div><small>${la?esc(la.name):"No scores"}</small><div>${la?studentBadges(m,la,pass,topNames):'<span class="pill blue">📘 No scores</span>'}</div>${la?studentSnapshot(m,la,pass,topNames):""}</div>`}).join("")||empty("No students.");
 }
 function drawTrendChart(z){
  let data=D.ass.map(a=>{let vs=z.ms.map(m=>calcPct(m,a)).filter(x=>x!=="");return vs.length?{label:a.name,value:vs.reduce((x,y)=>x+Number(y),0)/vs.length*100}:null}).filter(Boolean);
@@ -303,8 +337,8 @@ function buildStudentComponentTable(m){
  D.ass.forEach(a=>{
    let has=false;
    if(a.comps?.length)a.comps.forEach((c,j)=>{
-     let raw=m.ass[a.slot-1]?.components[j];if(raw===""||raw==null)return;
-     has=true;let p=(Number(raw)||0)/c.max,key=c.name.trim().toLowerCase();
+     let raw=m.ass[a.slot-1]?.components[j],p=scoreRatio(raw,c.max);if(p===null)return;
+     has=true;let key=c.name.trim().toLowerCase();
      if(!map.has(key))map.set(key,{name:c.name,points:new Map()});
      map.get(key).points.set(a.slot,{a,p})
    });
@@ -342,18 +376,18 @@ function drawStudentTrend(m){
    options:{responsive:true,maintainAspectRatio:false,scales:{y:{beginAtZero:true,max:100,ticks:{callback:v=>v+"%"}}},plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>" "+Number(c.raw).toFixed(1)+"%"}}}}
  })
 }
-function openP(n){
- let st=D.students.find(x=>x["Student Name"]===n)||{},m=mfor(n),i=latestIndex(m),a=D.ass.find(x=>x.slot-1===i),v=a?calcPct(m,a):"";
+function openP(key){
+ let st=D.students.find(x=>studentKey(x)===key)||{},m=mfor(st),i=latestIndex(m),a=D.ass.find(x=>x.slot-1===i),v=a?calcPct(m,a):"";
  let used=D.ass.filter(x=>calcPct(m,x)!=""),prev=used.length>1?calcPct(m,used[used.length-2]):"",diff=v!==""&&prev!==""?Number(v)-Number(prev):null;
- $("home").classList.add("hidden");$("profileView").classList.remove("hidden");$("pname").textContent=n;$("pmeta").textContent=[st.Class,D.setup.Subject,D.setup["Academic Year"]].filter(Boolean).join(" · ");
+ $("home").classList.add("hidden");$("profileView").classList.remove("hidden");$("pname").textContent=st["Student Name"]||"Student";$("pmeta").textContent=[st.Class,D.setup.Subject,D.setup["Academic Year"]].filter(Boolean).join(" · ");
  $("pkpis").innerHTML=kpi("Latest",pc(v),a?.name||"—")+kpi("Previous",pc(prev),"Previous available")+kpi("Change",diff==null?"—":(diff>=0?"+":"")+(diff*100).toFixed(1)+" pp","Assessment change")+kpi("Recorded",used.length,"Assessments");
  drawStudentTrend(m);
- let comps=[];if(a?.comps.length){a.comps.forEach((c,j)=>{let raw=m.ass[i]?.components[j];if(raw!==""&&raw!=null)comps.push({name:c.name,p:(Number(raw)||0)/c.max})})}
+ let comps=[];if(a?.comps.length){a.comps.forEach((c,j)=>{let raw=m.ass[i]?.components[j],p=scoreRatio(raw,c.max);if(p!==null)comps.push({name:c.name,p})})}
  $("studentComponentTable").innerHTML=buildStudentComponentTable(m);
- let custom=D.notes.filter(x=>x["Student Name"]===n&&x["Custom Priority / Recommendation"]).slice(-1)[0],weakest=[...comps].sort((x,y)=>x.p-y.p)[0];
+ let custom=D.notes.filter(x=>noteMatchesStudent(x,st)&&x["Custom Priority / Recommendation"]).slice(-1)[0],weakest=[...comps].sort((x,y)=>x.p-y.p)[0];
  let rec=weakest?D.recs.find(r=>String(r["Skill / Component"]).trim().toLowerCase()===weakest.name.trim().toLowerCase()&&weakest.p*100<(Number(r["Threshold Below (%)"])||50)):null,txt=custom?.["Custom Priority / Recommendation"]||rec?.["Specific Improvement Recommendation"]||"";
  $("priority").innerHTML=txt?`<div class="priority"><b>${custom?"Teacher priority":esc(weakest?.name||"Priority")}</b><br>${esc(txt)}</div>`:empty(weakest?`Lowest area: ${weakest.name} (${pc(weakest.p)}). Add a matching recommendation in the workbook if you want an automatic next step.`:"No specific priority available.");
- let ns=D.notes.filter(x=>x["Student Name"]===n);$("notes").innerHTML=ns.length?ns.map(x=>`<div class="note"><b>${esc(x["Note Type"]||"Note")}</b>${x.Date?" · "+esc(String(x.Date)):""}<br>${esc(x["Teacher Note"]||"")}${x["Follow-up / Action"]?`<br><span class="muted">Follow-up: ${esc(x["Follow-up / Action"])}</span>`:""}</div>`).join(""):empty("No saved notes.");scrollTo(0,0)
+ let ns=D.notes.filter(x=>noteMatchesStudent(x,st));$("notes").innerHTML=ns.length?ns.map(x=>`<div class="note"><b>${esc(x["Note Type"]||"Note")}</b>${x.Date?" · "+esc(String(x.Date)):""}<br>${esc(x["Teacher Note"]||"")}${x["Follow-up / Action"]?`<br><span class="muted">Follow-up: ${esc(x["Follow-up / Action"])}</span>`:""}</div>`).join(""):empty("No saved notes.");scrollTo(0,0)
 }
 function back(){$("profileView").classList.add("hidden");$("home").classList.remove("hidden");$("classHome").classList.add("hidden");$("classDashboard").classList.remove("hidden");scrollTo(0,0)}
 function kpi(a,b,c){return `<div class="card"><small>${esc(a)}</small><div class="v">${esc(String(b))}</div><small>${esc(c)}</small></div>`}function bar(n,v){return `<div class="bar"><b>${esc(n)}</b><div class="track"><div class="fill" style="width:${Math.max(0,Math.min(100,v*100))}%"></div></div><b>${pc(v)}</b></div>`}function component(n,v){return `<div class="component"><b>${esc(n)}</b><div class="track"><div class="fill" style="width:${Math.max(0,Math.min(100,v*100))}%"></div></div><b>${pc(v)}</b></div>`}function empty(t){return `<div class="empty">${esc(t)}</div>`}
