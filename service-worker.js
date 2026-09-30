@@ -1,4 +1,4 @@
-const CACHE = "assessment-tracker-release-3-20260916";
+const CACHE = "assessment-tracker-release-4-20260930";
 const APP_SHELL = [
   "/",
   "/index.html",
@@ -7,6 +7,8 @@ const APP_SHELL = [
   "/icons/icon-512.png",
   "/icons/icon-maskable-512.png",
   "/Assessment-Tracker-Template.xlsx",
+  "/progression-history.mjs",
+  "/owlumi-faq.png",
   "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js",
   "https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"
 ];
